@@ -1238,6 +1238,8 @@ let
 
   networkmanager = callPackage ../tools/networking/network-manager { };
 
+  networkmanager_openvpn = callPackage ../tools/networking/network-manager/openvpn.nix { };
+
   networkmanager_pptp = callPackage ../tools/networking/network-manager/pptp.nix { };
 
   networkmanager_pptp_gnome = networkmanager_pptp.override { withGnome = true; };
