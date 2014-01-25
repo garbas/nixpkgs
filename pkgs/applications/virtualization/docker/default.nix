@@ -1,4 +1,5 @@
-{ stdenv, fetchurl, makeWrapper, go, lxc, sqlite, iproute, iptables, lvm2 }:
+{ stdenv, fetchurl, makeWrapper, go, lxc, sqlite, iproute, iptables, lvm2
+, bash}:
 
 stdenv.mkDerivation rec {
   name = "docker-${version}";
@@ -9,9 +10,15 @@ stdenv.mkDerivation rec {
     sha256 = "0anlzba2vm1fs5nf0dl2svrgj3ddsbl5iyhsm8vfbi3f23vppkfv";
   };
 
-  phases = ["unpackPhase" "buildPhase" "installPhase"];
+  phases = ["unpackPhase" "preBuild" "buildPhase" "installPhase"];
 
   buildInputs = [ makeWrapper go sqlite lxc iproute lvm2 iptables ];
+
+  preBuild = ''
+    substituteInPlace ./hack/make.sh \
+        --replace "/bin/bash" "${bash}/bin/bash"
+    cat ./hack/make.sh
+  '';
 
   buildPhase = ''
     mkdir -p src/github.com/dotcloud
