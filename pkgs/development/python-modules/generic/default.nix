@@ -77,6 +77,30 @@ let
       }
     else if format == "setup" then
       {
+        preUnpack = ''
+          unpackFile() {
+              curSrc="$1"
+              header "unpacking source archive $curSrc" 3
+
+              tmp=`echo $RANDOM`
+              mkdir $tmp
+              pushd $tmp
+              if ! runOneHook unpackCmd "$curSrc"; then
+                  echo "do not know how to unpack source archive $curSrc"
+                  exit 1
+              fi
+              popd
+
+              for i in $tmp/*; do
+                chmod +w $i
+                mv $i src-`date +"%s.%N"`-`basename $i`
+              done
+
+              stopNest
+          }
+        '';
+        sourceRoot = ".";
+
         # propagate python/setuptools to active setup-hook in nix-shell
         propagatedBuildInputs =
           propagatedBuildInputs ++ [ python setuptools ];
@@ -85,14 +109,26 @@ let
         # many project make that assumption
         buildPhase = attrs.buildPhase or ''
           runHook preBuild
-          cp ${setuppy} nix_run_setup.py
-          ${python.interpreter} nix_run_setup.py ${lib.optionalString (setupPyBuildFlags != []) ("build_ext " + (lib.concatStringsSep " " setupPyBuildFlags))} bdist_wheel
+          for i in ./src-*; do
+            if [ -d $i ]; then
+              pushd $i
+              cp ${setuppy} nix_run_setup.py
+              ${python.interpreter} nix_run_setup.py ${lib.optionalString (setupPyBuildFlags != []) ("build_ext " + (lib.concatStringsSep " " setupPyBuildFlags))} bdist_wheel
+              popd
+            fi
+          done
           runHook postBuild
         '';
 
         installCheckPhase = attrs.checkPhase or ''
           runHook preCheck
-          ${python.interpreter} nix_run_setup.py test
+          for i in ./src-*; do
+            if [ -d $i ]; then
+              pushd $i
+              ${python.interpreter} nix_run_setup.py test
+              popd
+            fi
+          done
           runHook postCheck
         '';
 
@@ -112,7 +148,7 @@ python.stdenv.mkDerivation (builtins.removeAttrs attrs ["disabled" "doCheck"] //
 
   buildInputs = [ wrapPython bootstrapped-pip ] ++ buildInputs ++ pythonPath
     ++ [ (ensureNewerSourcesHook { year = "1980"; }) ]
-    ++ (lib.optional (lib.hasSuffix "zip" attrs.src.name or "") unzip);
+    ++ [unzip]; #(lib.optional (lib.hasSuffix "zip" attrs.src.name or "") unzip);
 
   pythonPath = pythonPath;
 
@@ -131,34 +167,51 @@ python.stdenv.mkDerivation (builtins.removeAttrs attrs ["disabled" "doCheck"] //
 
   installPhase = attrs.installPhase or ''
     runHook preInstall
-
     mkdir -p "$out/${python.sitePackages}"
     export PYTHONPATH="$out/${python.sitePackages}:$PYTHONPATH"
-
-    pushd dist
-    ${bootstrapped-pip}/bin/pip install *.whl --no-index --prefix=$out --no-cache ${toString installFlags}
-    popd
-
+    for i in ./src-*; do
+      if [ -d $i ]; then
+        pushd $i/dist
+        ${bootstrapped-pip}/bin/pip install *.whl --no-index --prefix=$out --no-cache ${toString installFlags}
+        popd
+      fi
+    done
     runHook postInstall
   '';
 
   postFixup = attrs.postFixup or ''
-    wrapPythonPrograms
-  '' + lib.optionalString catchConflicts ''
-    # check if we have two packages with the same name in closure and fail
-    # this shouldn't happen, something went wrong with dependencies specs
-    ${python.interpreter} ${./catch_conflicts.py}
+    for i in ./src-*; do
+      if [ -d $i ]; then
+        pushd $i
+        wrapPythonPrograms
+        # check if we have two packages with the same name in closure and fail
+        # this shouldn't happen, something went wrong with dependencies specs
+        ${lib.optionalString catchConflicts "${python.interpreter} ${./catch_conflicts.py}"}
+        popd
+      fi
+    done
   '';
 
   shellHook = attrs.shellHook or ''
-    ${preShellHook}
-    if test -e setup.py; then
-       tmp_path=$(mktemp -d)
-       export PATH="$tmp_path/bin:$PATH"
-       export PYTHONPATH="$tmp_path/${python.sitePackages}:$PYTHONPATH"
-       mkdir -p $tmp_path/${python.sitePackages}
-       ${bootstrapped-pip}/bin/pip install -e . --prefix $tmp_path
+    if [ -z "$srcs" ]; then
+        if [ -z "$src" ]; then
+            echo 'variable $src or $srcs should point to the source'
+            exit 1
+        fi
+        srcs="$src"
     fi
+    ${preShellHook}
+    for i in $srcs; do
+      if test -e $i/setup.py; then
+        pushd $i
+        tmp_path=$(mktemp -d)
+        export PATH="$tmp_path/bin:$PATH"
+        export PYTHONPATH="$tmp_path/${python.sitePackages}:$PYTHONPATH"
+        mkdir -p $tmp_path/${python.sitePackages}
+        ${bootstrapped-pip}/bin/pip install -e . --prefix $tmp_path
+        popd
+      fi
+    done
     ${postShellHook}
   '';
 
