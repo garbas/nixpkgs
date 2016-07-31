@@ -203,13 +203,13 @@ python.stdenv.mkDerivation (builtins.removeAttrs attrs ["disabled" "doCheck"] //
     ${preShellHook}
     for i in $srcs; do
       if test -e $i/setup.py; then
-        pushd $i
+        pushd $i >> /dev/null
         tmp_path=$(mktemp -d)
         export PATH="$tmp_path/bin:$PATH"
         export PYTHONPATH="$tmp_path/${python.sitePackages}:$PYTHONPATH"
         mkdir -p $tmp_path/${python.sitePackages}
-        ${bootstrapped-pip}/bin/pip install -e . --prefix $tmp_path
-        popd
+        ${bootstrapped-pip}/bin/pip install -q -e . --prefix $tmp_path
+        popd >> /dev/null
       fi
     done
     ${postShellHook}
