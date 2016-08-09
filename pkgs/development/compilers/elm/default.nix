@@ -80,6 +80,7 @@ let
       };
   };
 in hsPkgs.elmPkgs // {
+  lib = { inherit makeElmStuff; };
   elm = buildEnv {
     name = "elm-${hsPkgs.elmVersion}";
     paths = lib.mapAttrsToList (name: pkg: pkg) hsPkgs.elmPkgs;
