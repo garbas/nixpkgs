@@ -96,6 +96,8 @@ let
                 mv $i src-`date +"%s.%N"`-`basename $i`
               done
 
+              rm -rf $tmp
+
               stopNest
           }
         '';
@@ -110,7 +112,7 @@ let
         buildPhase = attrs.buildPhase or ''
           runHook preBuild
           for i in ./src-*; do
-            if [ -d $i ]; then
+            if test -e $i/setup.py; then
               pushd $i
               cp ${setuppy} nix_run_setup.py
               ${python.interpreter} nix_run_setup.py ${lib.optionalString (setupPyBuildFlags != []) ("build_ext " + (lib.concatStringsSep " " setupPyBuildFlags))} bdist_wheel
