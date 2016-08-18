@@ -125,7 +125,7 @@ let
         installCheckPhase = attrs.checkPhase or ''
           runHook preCheck
           for i in ./src-*; do
-            if [ -d $i ]; then
+            if [ -e $i/nix_run_setup.py ]; then
               pushd $i
               ${python.interpreter} nix_run_setup.py test
               popd
@@ -154,6 +154,15 @@ python.stdenv.mkDerivation (builtins.removeAttrs attrs ["disabled" "doCheck"] //
 
   pythonPath = pythonPath;
 
+  prePatch = attrs.prePatch or ''
+    tmp_srcs=(./src-*)
+    cd ''${tmp_srcs[-1]}
+  '';
+
+  postPatch = attrs.postPatch or ''
+    cd ..
+  '';
+
   configurePhase = attrs.configurePhase or ''
     runHook preConfigure
 
@@ -172,7 +181,7 @@ python.stdenv.mkDerivation (builtins.removeAttrs attrs ["disabled" "doCheck"] //
     mkdir -p "$out/${python.sitePackages}"
     export PYTHONPATH="$out/${python.sitePackages}:$PYTHONPATH"
     for i in ./src-*; do
-      if [ -d $i ]; then
+      if [ -d $i/dist ]; then
         pushd $i/dist
         ${bootstrapped-pip}/bin/pip install *.whl --no-index --prefix=$out --no-cache ${toString installFlags}
         popd
