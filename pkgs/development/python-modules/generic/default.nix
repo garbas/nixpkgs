@@ -99,9 +99,13 @@ let
               rm -rf $tmp
 
               stopNest
+
+              tmp_srcs=(./src-*)
+              if [[ "''${#tmp_srcs[@]}" != "1" ]]; then
+                export sourceRoot=$PWD
+              fi
           }
         '';
-        sourceRoot = ".";
 
         # propagate python/setuptools to active setup-hook in nix-shell
         propagatedBuildInputs =
@@ -111,26 +115,31 @@ let
         # many project make that assumption
         buildPhase = attrs.buildPhase or ''
           runHook preBuild
-          for i in ./src-*; do
-            if test -e $i/setup.py; then
+          if [[ "''${#tmp_srcs[@]}" != "1" ]]; then
+            for i in ./src-*; do
               pushd $i
               cp ${setuppy} nix_run_setup.py
               ${python.interpreter} nix_run_setup.py ${lib.optionalString (setupPyBuildFlags != []) ("build_ext " + (lib.concatStringsSep " " setupPyBuildFlags))} bdist_wheel
               popd
-            fi
-          done
+            done
+          else
+            cp ${setuppy} nix_run_setup.py
+            ${python.interpreter} nix_run_setup.py ${lib.optionalString (setupPyBuildFlags != []) ("build_ext " + (lib.concatStringsSep " " setupPyBuildFlags))} bdist_wheel
+          fi
           runHook postBuild
         '';
 
         installCheckPhase = attrs.checkPhase or ''
           runHook preCheck
-          for i in ./src-*; do
-            if [ -e $i/nix_run_setup.py ]; then
+          if [[ "''${#tmp_srcs[@]}" != "1" ]]; then
+            for i in ./src-*; do
               pushd $i
               ${python.interpreter} nix_run_setup.py test
               popd
-            fi
-          done
+            done
+          else
+            ${python.interpreter} nix_run_setup.py test
+          fi
           runHook postCheck
         '';
 
@@ -154,15 +163,6 @@ python.stdenv.mkDerivation (builtins.removeAttrs attrs ["disabled" "doCheck"] //
 
   pythonPath = pythonPath;
 
-  prePatch = attrs.prePatch or ''
-    tmp_srcs=(./src-*)
-    cd ''${tmp_srcs[-1]}
-  '';
-
-  postPatch = attrs.postPatch or ''
-    cd ..
-  '';
-
   configurePhase = attrs.configurePhase or ''
     runHook preConfigure
 
@@ -180,27 +180,38 @@ python.stdenv.mkDerivation (builtins.removeAttrs attrs ["disabled" "doCheck"] //
     runHook preInstall
     mkdir -p "$out/${python.sitePackages}"
     export PYTHONPATH="$out/${python.sitePackages}:$PYTHONPATH"
-    for i in ./src-*; do
-      if [ -d $i/dist ]; then
+    if [[ "''${#tmp_srcs[@]}" != "1" ]]; then
+      for i in ./src-*; do
         pushd $i/dist
         ${bootstrapped-pip}/bin/pip install *.whl --no-index --prefix=$out --no-cache ${toString installFlags}
         popd
-      fi
-    done
+      done
+    else
+      pushd dist
+      ${bootstrapped-pip}/bin/pip install *.whl --no-index --prefix=$out --no-cache ${toString installFlags}
+      popd
+    fi
     runHook postInstall
   '';
 
   postFixup = attrs.postFixup or ''
-    for i in ./src-*; do
-      if [ -d $i ]; then
-        pushd $i
-        wrapPythonPrograms
-        # check if we have two packages with the same name in closure and fail
-        # this shouldn't happen, something went wrong with dependencies specs
-        ${lib.optionalString catchConflicts "${python.interpreter} ${./catch_conflicts.py}"}
-        popd
-      fi
-    done
+    if [[ "''${#tmp_srcs[@]}" != "1" ]]; then
+      for i in ./src-*; do
+        if [ -d $i ]; then
+          pushd $i
+          wrapPythonPrograms
+          # check if we have two packages with the same name in closure and fail
+          # this shouldn't happen, something went wrong with dependencies specs
+          ${lib.optionalString catchConflicts "${python.interpreter} ${./catch_conflicts.py}"}
+          popd
+        fi
+      done
+    else
+      wrapPythonPrograms
+      # check if we have two packages with the same name in closure and fail
+      # this shouldn't happen, something went wrong with dependencies specs
+      ${lib.optionalString catchConflicts "${python.interpreter} ${./catch_conflicts.py}"}
+    fi
   '';
 
   shellHook = attrs.shellHook or ''
@@ -212,17 +223,27 @@ python.stdenv.mkDerivation (builtins.removeAttrs attrs ["disabled" "doCheck"] //
         srcs="$src"
     fi
     ${preShellHook}
-    for i in $srcs; do
-      if test -e $i/setup.py; then
-        pushd $i >> /dev/null
+    if [[ "''${#tmp_srcs[@]}" != "1" ]]; then
+      for i in $srcs; do
+        if test -e $i/setup.py; then
+          pushd $i >> /dev/null
+          tmp_path=$(mktemp -d)
+          export PATH="$tmp_path/bin:$PATH"
+          export PYTHONPATH="$tmp_path/${python.sitePackages}:$PYTHONPATH"
+          mkdir -p $tmp_path/${python.sitePackages}
+          ${bootstrapped-pip}/bin/pip install -q -e . --prefix $tmp_path
+          popd >> /dev/null
+        fi
+      done
+    else
+      if test -e setup.py; then
         tmp_path=$(mktemp -d)
         export PATH="$tmp_path/bin:$PATH"
         export PYTHONPATH="$tmp_path/${python.sitePackages}:$PYTHONPATH"
         mkdir -p $tmp_path/${python.sitePackages}
         ${bootstrapped-pip}/bin/pip install -q -e . --prefix $tmp_path
-        popd >> /dev/null
       fi
-    done
+    fi
     ${postShellHook}
   '';
 
