@@ -35,7 +35,7 @@ let
         else
           builtins.getAttr maintainer' pkgs.lib.maintainers;
     in
-      packagesWith (name: pkg: builtins.hasAttr "updateScript" pkg &&
+      packagesWith (name: pkg: hasUpdateScript pkg &&
                                  (if builtins.hasAttr "maintainers" pkg.meta
                                    then (if builtins.isList pkg.meta.maintainers
                                            then builtins.elem maintainer pkg.meta.maintainers
@@ -47,13 +47,24 @@ let
                    (name: pkg: pkg)
                    pkgs;
 
+
+  packagesWithUpdateScript =
+    packagesWith (name: pkg: hasUpdateScript pkg)
+                 (name: pkg: pkg)
+                 pkgs;
+
+  hasUpdateScript = pkg:
+    (builtins.hasAttr "updateScript" pkg) ||
+    (builtins.hasAttr "src" pkg && builtins.hasAttr "updateScript" pkg.src);
+
+
   packageByName = name:
     let
         package = pkgs.lib.attrByPath (pkgs.lib.splitString "." name) null pkgs;
     in
       if package == null then
         builtins.throw "Package with an attribute name `${name}` does not exists."
-      else if ! builtins.hasAttr "updateScript" package then
+      else if ! (hasUpdateScript package) then
         builtins.throw "Package with an attribute name `${name}` does have an `passthru.updateScript` defined."
       else
         package;
@@ -64,7 +75,9 @@ let
     else if maintainer != null then
       packagesWithUpdateScriptAndMaintainer maintainer
     else
-      builtins.throw "No arguments provided.\n\n${helpText}";
+      packagesWithUpdateScript;
+
+      #builtins.throw "No arguments provided.\n\n${helpText}";
 
   helpText = ''
     Please run:
@@ -79,24 +92,31 @@ let
     to run update script for specific package.
   '';
 
-  runUpdateScript = package: ''
-    echo -ne " - ${package.name}: UPDATING ..."\\r
-    ${package.updateScript} &> ${(builtins.parseDrvName package.name).name}.log
-    CODE=$?
-    if [ "$CODE" != "0" ]; then
-      echo " - ${package.name}: ERROR       "
-      echo ""
-      echo "--- SHOWING ERROR LOG FOR ${package.name} ----------------------"
-      echo ""
-      cat ${(builtins.parseDrvName package.name).name}.log
-      echo ""
-      echo "--- SHOWING ERROR LOG FOR ${package.name} ----------------------"
-      exit $CODE
-    else
-      rm ${(builtins.parseDrvName package.name).name}.log
-    fi
-    echo " - ${package.name}: DONE.       "
-  '';
+  runUpdateScript = package:
+    let
+      updateScript =
+        if builtins.hasAttr "updateScript" package
+        then package.updateScript
+        else package.src.updateScript;
+    in
+      ''
+        echo -ne " - ${package.name}: UPDATING ..."\\r
+        ${updateScript} &> ${(builtins.parseDrvName package.name).name}.log
+        CODE=$?
+        if [ "$CODE" != "0" ]; then
+          echo " - ${package.name}: ERROR       "
+          echo ""
+          echo "--- SHOWING ERROR LOG FOR ${package.name} ----------------------"
+          echo ""
+          cat ${(builtins.parseDrvName package.name).name}.log
+          echo ""
+          echo "--- SHOWING ERROR LOG FOR ${package.name} ----------------------"
+          exit $CODE
+        else
+          rm ${(builtins.parseDrvName package.name).name}.log
+        fi
+        echo " - ${package.name}: DONE.       "
+      '';
 
 in pkgs.stdenv.mkDerivation {
   name = "nixpkgs-update-script";
