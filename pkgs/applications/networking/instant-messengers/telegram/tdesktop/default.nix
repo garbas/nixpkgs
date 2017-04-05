@@ -6,13 +6,13 @@
 
 stdenv.mkDerivation rec {
   name = "telegram-desktop-${version}";
-  version = "1.0.27";
+  version = "1.0.28";
 
   # Submodules
   src = fetchgit {
     url = "https://github.com/telegramdesktop/tdesktop";
     rev = "refs/tags/v${version}";
-    sha256 = "05g88g6h2a7f9biliicg81fqssx0y3akd3y5r2q2b5h8q3igqrfc";
+    sha256 = "082h1sji201xa2hxrh97cigi8c1ba0nj6bxh0jfjpriv7bxsr26p";
   };
 
   tgaur = fetchgit {
@@ -27,7 +27,9 @@ stdenv.mkDerivation rec {
 
   nativeBuildInputs = [ pkgconfig gyp cmake makeQtWrapper ];
 
-  patches = [ "${tgaur}/aur-build-fixes.patch" ];
+  # patch needed to be updated a bit
+  #patches = [ "${tgaur}/aur-build-fixes.patch" ];
+  patches = [ ./aur-build-fixes.patch ];
 
   enableParallelBuilding = true;
 
