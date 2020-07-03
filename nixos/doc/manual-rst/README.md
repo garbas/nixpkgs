@@ -22,3 +22,29 @@ was used to build upon.
 For the purpose of this experiment
 [`installation/installing.xml.md`](https://github.com/garbas/nixpkgs/blob/manual-markdown-sphinx/nixos/doc/manual-rst/source/installation/installing.xml.md)
 document was converted manually from restructuredtext to markdown.
+
+# Try it for yourself
+
+1. Enter development shell by running
+
+   ```console
+   $ nix dev-shell
+   ```
+
+2. Build it by running `sphinx-build` command
+
+```console
+(nix-shell)$ sphinx-build -M html ./source ./build
+```
+
+HTML will be generated in `./build/html` folder.
+
+3. You can also run a development server which will autoreload by running
+
+```console
+(nix-shell)$ python live.py
+```
+
+It might take some time to build it the first time, but after then it will 
+watch all of the source files, rebuild it (faster because things will be 
+cached from the first time) and reload the page in the browser.
