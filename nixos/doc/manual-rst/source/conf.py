@@ -15,6 +15,8 @@
 # import os
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
+import recommonmark
+from recommonmark.transform import AutoStructify
 
 
 # -- Project information -----------------------------------------------------
@@ -39,7 +41,8 @@ release = u''
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'recommonmark'
+    'sphinx_rtd_theme',
+    'recommonmark',
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -79,7 +82,8 @@ pygments_style = None
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'alabaster'
+#html_theme = 'alabaster'
+html_theme = 'sphinx_rtd_theme'
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -176,3 +180,16 @@ epub_title = project
 
 # A list of files that should not be packed into the epub file.
 epub_exclude_files = ['search.html']
+
+# setup hook
+def setup(app):
+    app.add_config_value('recommonmark_config', {
+        #'url_resolver': lambda url: github_doc_root + url,
+        'enable_auto_toc_tree': True,
+        'auto_toc_tree_section': 'Contents',
+        'enable_math': False,
+        'enable_inline_math': False,
+        'enable_eval_rst': True,
+        'enable_auto_doc_ref': True,
+    }, True)
+    app.add_transform(AutoStructify)

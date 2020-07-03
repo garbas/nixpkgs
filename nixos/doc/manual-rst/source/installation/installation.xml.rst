@@ -12,7 +12,7 @@ first-time use.
 
 .. toctree::
 
-   installing.xml.rst
+   installing.xml.md
 
 .. toctree::
 

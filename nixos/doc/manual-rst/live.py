@@ -9,5 +9,7 @@ build_docs()
 
 server.watch("source/*.rst", build_docs)
 server.watch("source/**/*.rst", build_docs)
+server.watch("source/*.md", build_docs)
+server.watch("source/**/*.md", build_docs)
 server.watch("_templates/*.html", build_docs)
 server.serve(root="build/html")
