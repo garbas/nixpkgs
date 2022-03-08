@@ -88,6 +88,10 @@ let
       orga = "stsewd";
       repo = "tree-sitter-comment";
     };
+    "tree-sitter-cue" = {
+      orga = "eonpatapon";
+      repo = "tree-sitter-cue";
+    };
     "tree-sitter-dart" = {
       orga = "usernobody14";
       repo = "tree-sitter-dart";
