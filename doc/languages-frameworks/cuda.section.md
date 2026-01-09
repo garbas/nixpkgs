@@ -1,6 +1,11 @@
 # CUDA {#cuda}
 
-Compute Unified Device Architecture (CUDA) is a parallel computing platform and application programming interface (API) model created by NVIDIA. It's commonly used to accelerate computationally intensive problems and has been widely adopted for high-performance computing (HPC) and machine learning (ML) applications.
+Compute Unified Device Architecture (CUDA) is a parallel computing platform and application programming interface (API) created by NVIDIA for GPU-accelerated computing. It's widely used for high-performance computing (HPC) and machine learning (ML) applications.
+
+This chapter covers:
+- **User Guide**: Configuring nixpkgs for CUDA, using the binary cache, and running CUDA applications
+- **Contributing**: Maintaining CUDA packages, updating redistributables, and writing tests
+- **Troubleshooting**: Common build and runtime issues
 
 ## User Guide {#cuda-user-guide}
 
@@ -39,13 +44,60 @@ The majority of CUDA packages are unfree, so either `allowUnfreePredicate` or `a
 
 The `cudaSupport` configuration option is used by packages to conditionally enable CUDA-specific functionality. This configuration option is commonly used by packages which can be built with or without CUDA support.
 
-The `cudaCapabilities` configuration option specifies a list of CUDA capabilities. Packages may use this option to control device code generation to take advantage of architecture-specific functionality, speed up compile times by producing less device code, or slim package closures. For example, you can build for Ada Lovelace GPUs with `cudaCapabilities = [ "8.9" ];`. If `cudaCapabilities` is not provided, the default value is calculated per-package set, derived from a list of GPUs supported by that CUDA version. Please consult [supported GPUs](https://en.wikipedia.org/wiki/CUDA#GPUs_supported) for specific cards. Library maintainers should consult [NVCC Docs](https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/) and its release notes.
+The `cudaCapabilities` configuration option specifies a list of CUDA capabilities. Packages use this option to control device code generation, which affects:
+
+- **Performance**: Architecture-specific code can leverage hardware features
+- **Build time**: Fewer capabilities means faster compilation (NVCC is slow)
+- **Closure size**: Device code is large; fewer targets means smaller binaries
+
+For example, build for Ada Lovelace GPUs with `cudaCapabilities = [ "8.9" ];`. If not provided, the default is calculated per-package set based on GPUs supported by that CUDA version.
+
+#### Understanding capability suffixes {#cuda-capability-suffixes}
+
+CUDA capabilities identify GPU architectures and their feature sets:
+
+- **Base capability** (e.g., `"9.0"`): Standard features for an architecture (Hopper)
+- **Architecture-specific** suffix `a` (e.g., `"9.0a"`): Hardware-exclusive features, not forward-compatible via PTX
+- **Family-specific** suffix `f` (e.g., `"10.0f"`): Features shared across a chip family (Blackwell)
+- **Jetson capabilities** (e.g., `"8.7"`): NVIDIA's embedded devices, requires `aarch64-linux`
+
+For the complete list of capabilities, see:
+
+- [NVIDIA CUDA GPUs](https://developer.nvidia.com/cuda-gpus)
+- [Arnon Shimoni's Architecture Guide](https://arnon.dk/matching-sm-architectures-arch-and-gencode-for-various-nvidia-cards/)
+- In-tree reference: `pkgs/development/cuda-modules/_cuda/db/bootstrap/cuda.nix`
 
 ::: {.caution}
-Certain CUDA capabilities are not targeted by default, including capabilities belonging to the Jetson family of devices (e.g. `8.7`, which corresponds to the Jetson Orin) or non-baseline feature-sets (e.g. `9.0a`, which corresponds to the Hopper exclusive feature set). If you need to target these capabilities, you must explicitly set `cudaCapabilities` to include them.
+Capabilities with suffixes (`a`, `f`) and Jetson capabilities are **not built by default**. You must explicitly include them in `cudaCapabilities`.
 :::
 
-The `cudaForwardCompat` boolean configuration option determines whether PTX support for future hardware is enabled.
+The `cudaForwardCompat` boolean configuration option determines whether PTX support for future hardware is enabled. PTX is NVIDIA's intermediate representation (similar to assembly) that can be JIT-compiled for newer GPUs at runtime. Enable this when distributing binaries that should work on future hardware; disable it when targeting architecture-specific features (e.g., `9.0a`) or to reduce binary size.
+
+### Using the CUDA Binary Cache {#cuda-binary-cache}
+
+Building CUDA packages from source is time-consuming. A community binary cache is available at `cache.nixos-cuda.org`.
+
+For NixOS (`configuration.nix`):
+
+```nix
+{
+  nix.settings = {
+    substituters = [ "https://cache.nixos-cuda.org" ];
+    trusted-public-keys = [ "cache.nixos-cuda.org-1:xFwPMlkdPPGSwQdmgSPuWlOVQ5/6BfgAQaFFBbP8PMs=" ];
+  };
+}
+```
+
+For non-NixOS (`~/.config/nix/nix.conf`):
+
+```ini
+extra-substituters = https://cache.nixos-cuda.org
+extra-trusted-public-keys = cache.nixos-cuda.org-1:xFwPMlkdPPGSwQdmgSPuWlOVQ5/6BfgAQaFFBbP8PMs=
+```
+
+::: {.note}
+The cache moved from `cuda-maintainers.cachix.org` to `cache.nixos-cuda.org` in November 2025.
+:::
 
 ### Modifying CUDA package sets {#cuda-modifying-cuda-package-sets}
 
@@ -80,6 +132,44 @@ final: prev: {
 ```
 
 Redistributable packages are constructed by the `buildRedist` helper; see `pkgs/development/cuda-modules/buildRedist/default.nix` for the implementation.
+
+### Using Legacy CUDA Versions {#cuda-legacy-versions}
+
+CUDA versions are periodically removed from nixpkgs when their required compiler versions (GCC/Clang) are no longer maintained in nixpkgs. The [cuda-legacy](https://github.com/nixos-cuda/cuda-legacy) repository preserves these older versions as overlays.
+
+To use cuda-legacy in a flake:
+
+```nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    cuda-legacy.url = "github:nixos-cuda/cuda-legacy";
+  };
+
+  outputs = { nixpkgs, cuda-legacy, ... }: {
+    packages.x86_64-linux.default =
+      let
+        pkgs = import nixpkgs {
+          system = "x86_64-linux";
+          overlays = [ cuda-legacy.overlays.default ];
+          config.allowUnfree = true;
+        };
+      in
+      # Now you can access older CUDA versions
+      pkgs.cudaPackages_11_8.cudatoolkit;
+  };
+}
+```
+
+cuda-legacy provides:
+
+- Manifests for CUDA versions removed from nixpkgs
+- Vendored older GCC versions (9, 10, 11) required by older CUDA releases
+- The same package expressions as nixpkgs (ensuring compatibility)
+
+::: {.warning}
+cuda-legacy is provided as-is with limited maintenance guarantees. Use at your own risk.
+:::
 
 ### Using `cudaPackages` {#cuda-using-cudapackages}
 
@@ -116,8 +206,110 @@ When using `callPackage`, you can choose to pass in a different variant, e.g. wh
 ```
 
 ::: {.caution}
-Overriding the CUDA package set for a package may cause inconsistencies, because the override does not affect its direct or transitive dependencies. As a result, it is easy to end up with a package that use a different CUDA package set than its dependencies. If possible, it is recommended that you change the default CUDA package set globally, to ensure a consistent environment.
+Overriding the CUDA package set for a package may cause inconsistencies, because the override does not affect its direct or transitive dependencies. As a result, it is easy to end up with a package that uses a different CUDA package set than its dependencies. If possible, change the default CUDA package set globally to ensure a consistent environment.
 :::
+
+### Using `backendStdenv` {#cuda-using-backendstdenv}
+
+NVCC (NVIDIA's CUDA compiler) is tightly coupled to specific versions of host compilers (GCC or Clang). Using an incompatible compiler version causes:
+
+- Compilation failures or cryptic error messages
+- Standard library parsing errors due to language feature changes
+- Runtime linking issues from mismatched glibc or libstdc++ versions
+
+`cudaPackages.backendStdenv` provides a standard environment with a compiler version compatible with the CUDA version in that package set. **Always use `backendStdenv` instead of `stdenv` when building CUDA code.**
+
+For packages with optional CUDA support:
+
+```nix
+{
+  config,
+  cudaSupport ? config.cudaSupport,
+  cudaPackages,
+  stdenv,
+}:
+let
+  effectiveStdenv = if cudaSupport then cudaPackages.backendStdenv else stdenv;
+in
+effectiveStdenv.mkDerivation {
+  # ...
+}
+```
+
+`backendStdenv` exposes useful attributes for build logic:
+
+| Attribute | Description |
+|-----------|-------------|
+| `cudaCapabilities` | Validated list of capabilities for this CUDA version |
+| `hasJetsonCudaCapability` | Whether any Jetson capability is selected |
+| `hasArchitectureSpecificCudaCapability` | Whether any `a` suffix capability is selected |
+| `hostRedistSystem` | NVIDIA's platform identifier (e.g., `linux-x86_64`) |
+
+### Using `cudaPackages.flags` {#cuda-using-flags}
+
+The `flags` attribute provides pre-formatted strings and utilities for configuring CUDA builds:
+
+| Attribute | Description | Example |
+|-----------|-------------|---------|
+| `cudaCapabilities` | List of capabilities | `["8.6" "8.9"]` |
+| `cmakeCudaArchitecturesString` | Semicolon-separated for CMake | `"86;89"` |
+| `gencode` | List of NVCC gencode flags | `["-gencode=arch=compute_86,code=sm_86" ...]` |
+| `gencodeString` | Space-separated gencode string | For shell commands |
+| `realArches` | SASS architecture identifiers | `["sm_86" "sm_89"]` |
+| `virtualArches` | PTX architecture identifiers | `["compute_86" "compute_89"]` |
+
+Example CMake usage:
+
+```nix
+cmakeFlags = [
+  "-DCMAKE_CUDA_ARCHITECTURES=${cudaPackages.flags.cmakeCudaArchitecturesString}"
+];
+```
+
+### NVCC Compiler Compatibility {#cuda-nvcc-compiler-compatibility}
+
+NVCC requires specific versions of host compilers. The table below shows supported compiler ranges:
+
+| CUDA | GCC Min | GCC Max | Clang Min | Clang Max |
+|------|---------|---------|-----------|-----------|
+| 12.6 | 6 | 13 | 7 | 18 |
+| 12.8 | 6 | 14 | 7 | 19 |
+| 12.9 | 6 | 14 | 7 | 19 |
+| 13.0 | 6 | 15 | 7 | 20 |
+
+For the complete compatibility matrix, see:
+
+- [NVIDIA CUDA Installation Guide - Host Compiler Support](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html#host-compiler-support-policy)
+- In-tree reference: `pkgs/development/cuda-modules/_cuda/db/bootstrap/nvcc.nix`
+
+::: {.note}
+`backendStdenv` automatically selects a compatible compiler. This table is primarily useful for debugging compiler-related build failures.
+:::
+
+### Understanding CUDA Package Outputs {#cuda-package-outputs}
+
+CUDA packages use multiple outputs to manage their large file sizes. Unlike typical packages, CUDA packages separate components more aggressively:
+
+| Output | Contents | Notes |
+|--------|----------|-------|
+| `out` | Runtime binaries and default files | Usually what you want for running applications |
+| `bin` | Executables only | |
+| `dev` | CMake configs, pkg-config files | Pulls in `lib` and `include` via propagation |
+| `lib` | Dynamic libraries (`.so` files) | Can be several gigabytes |
+| `static` | Static libraries (`.a` files) | Often exceeds 2GB; kept separate intentionally |
+| `include` | Header files | Useful when you only need headers, not binaries |
+| `stubs` | Stub libraries for linking | Used when runtime libs come from driver |
+| `doc` | Documentation | |
+| `samples` | Example code | |
+| `python` | Python bindings | |
+
+::: {.note}
+The `dev` output is selected by default when using a CUDA package as a build input. It pulls in `lib` and `include` through `propagatedBuildInputs`, so you typically don't need to specify outputs explicitly.
+:::
+
+**Why this structure?**
+
+CUDA static libraries are enormous (a single library can exceed 2GB). Placing them in `dev` (as is conventional) would force everyone to download gigabytes of rarely-used files. By separating `static`, users only download what they need.
 
 ### Nixpkgs CUDA variants {#cuda-nixpkgs-cuda-variants}
 
@@ -274,7 +466,7 @@ This section of the docs is still very much in progress. Feedback is welcome in 
 
 The CUDA Toolkit is a suite of CUDA libraries and software meant to provide a development environment for CUDA-accelerated applications. Until the release of CUDA 11.4, NVIDIA had only made the CUDA Toolkit available as a multi-gigabyte runfile installer. From CUDA 11.4 and onwards, NVIDIA has also provided CUDA redistributables (“CUDA-redist”): individually packaged CUDA Toolkit components meant to facilitate redistribution and inclusion in downstream projects. These packages are available in the [`cudaPackages`](https://search.nixos.org/packages?channel=unstable&type=packages&query=cudaPackages) package set.
 
-While the monolithic CUDA Toolkit runfile installer is no longer provided, [`cudaPackages.cudatoolkit`](https://search.nixos.org/packages?channel=unstable&type=packages&query=cudaPackages.cudatoolkit) provides a `symlinkJoin`-ed approximation which common libraries. The use of [`cudaPackages.cudatoolkit`](https://search.nixos.org/packages?channel=unstable&type=packages&query=cudaPackages.cudatoolkit) is discouraged: all new projects should use the CUDA redistributables available in [`cudaPackages`](https://search.nixos.org/packages?channel=unstable&type=packages&query=cudaPackages) instead, as they are much easier to maintain and update.
+While the monolithic CUDA Toolkit runfile installer is no longer provided, [`cudaPackages.cudatoolkit`](https://search.nixos.org/packages?channel=unstable&type=packages&query=cudaPackages.cudatoolkit) provides a `symlinkJoin`-ed approximation of common libraries. The use of [`cudaPackages.cudatoolkit`](https://search.nixos.org/packages?channel=unstable&type=packages&query=cudaPackages.cudatoolkit) is discouraged: all new projects should use the CUDA redistributables available in [`cudaPackages`](https://search.nixos.org/packages?channel=unstable&type=packages&query=cudaPackages) instead, as they are much easier to maintain and update.
 
 #### Updating redistributables {#cuda-updating-redistributables}
 
@@ -314,12 +506,25 @@ As described in [Using `cudaPackages.pkgs`](#cuda-using-cudapackages-pkgs), the 
 | Find libraries | `configurePhase`                 | Missing dependency on a `dev` output             | Add the missing dependency | The `dev` output typically contains CMake configuration files |
 | Find libraries | `buildPhase` or `patchelf`       | Missing dependency on a `lib` or `static` output | Add the missing dependency | The `lib` or `static` output typically contains the libraries |
 
-::: {.note}
-Two utility derivations ease testing updates to the package set:
+#### Debugging with Test Utilities {#cuda-test-utilities}
 
-- `cudaPackages.tests.redists-unpacked`: the `src` of each redistributable package unpacked and `symlinkJoin`-ed
-- `cudaPackages.tests.redists-installed`: each output of each redistributable package `symlinkJoin`-ed
-:::
+Two utility derivations help debug CUDA package issues:
+
+- **`cudaPackages.tests.redists-unpacked`**: All redistributable sources unpacked and joined. Shows raw NVIDIA tarball contents before nixpkgs processing. Useful for finding which package contains a specific file.
+
+- **`cudaPackages.tests.redists-installed`**: All redistributable outputs joined after installation. Shows where files end up after processing. Useful for verifying output placement.
+
+Example usage:
+
+```bash
+# See what's in the raw NVIDIA archives
+nix build .#cudaPackages.tests.redists-unpacked
+find result/ -name "libcudnn*"
+
+# See where files end up after installation
+nix build .#cudaPackages.tests.redists-installed
+ls result/lib/
+```
 
 Failure to run the resulting binary is typically the most challenging to diagnose, as it may involve a combination of the aforementioned issues. This type of failure typically occurs when a library attempts to load or open a library it depends on that it does not declare in its `DT_NEEDED` section. Try the following debugging steps:
 
@@ -368,3 +573,66 @@ Tests which always require CUDA should be placed in `passthru.tests.cuda`, while
 :::
 
 This is useful for tests which are deterministic (e.g., checking exit codes) and which can be provided with all necessary resources in the sandbox.
+
+## Troubleshooting {#cuda-troubleshooting}
+
+### Common Build Issues
+
+**"GLIBCXX_* not found" or similar linker errors**
+
+You're likely mixing compiler versions. Ensure all CUDA-dependent packages use `cudaPackages.backendStdenv` instead of `stdenv`. See [Using `backendStdenv`](#cuda-using-backendstdenv).
+
+**Can't find CUDA headers or libraries during build**
+
+Check that:
+1. The package is in `buildInputs` or `nativeBuildInputs` (depending on whether it's used at build or runtime)
+2. You're using the correct output (`dev` for headers/CMake files, `lib` for libraries)
+3. `strictDeps = true;` and `__structuredAttrs = true;` are set in your derivation
+
+**CMake can't find CUDA**
+
+Use the `flags` helper to set the architecture string:
+```nix
+cmakeFlags = [
+  "-DCMAKE_CUDA_ARCHITECTURES=${cudaPackages.flags.cmakeCudaArchitecturesString}"
+];
+```
+
+### Common Runtime Issues
+
+**Library not found despite being in dependencies**
+
+NVIDIA libraries frequently use `dlopen` to load dependencies at runtime rather than declaring them in `DT_NEEDED`. These won't be automatically found. Try:
+
+1. Ensure `autoAddDriverRunpath` hook is applied to the package
+2. Run with [`nixGL`](https://github.com/guibou/nixGL) or similar wrapper
+3. Use `strace` to identify what's being dlopen'd:
+   ```bash
+   strace -e openat ./your-program 2>&1 | grep -E '\.(so|dylib)'
+   ```
+
+**"CUDA driver version is insufficient"**
+
+Your system's NVIDIA driver is older than required by the CUDA toolkit version. Either:
+- Update your NVIDIA driver
+- Use an older CUDA package set (e.g., `cudaPackages_12_6` instead of `cudaPackages_13_0`)
+
+**Build works but crashes at runtime**
+
+Version mismatches between CUDA libraries (cuDNN, TensorRT, cuBLAS) can cause runtime failures even when builds succeed. NVIDIA's documented compatibility matrices are not always accurate. Ensure all CUDA libraries come from the same package set.
+
+**"Unsupported GPU" or "no kernel image available"**
+
+Your GPU's compute capability isn't in `config.cudaCapabilities`. Add it:
+```nix
+{
+  config.cudaCapabilities = [ "8.9" ];  # For RTX 40xx
+}
+```
+
+For architecture-specific capabilities (like `9.0a`), you must explicitly request them as they're not built by default.
+
+### Getting Help
+
+- File issues at [NixOS/nixpkgs](https://github.com/NixOS/nixpkgs/issues) tagging `@NixOS/cuda-maintainers`
+- Join the discussion on [Matrix #cuda:nixos.org](https://matrix.to/#/#cuda:nixos.org)
